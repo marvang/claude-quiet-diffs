@@ -2,6 +2,9 @@ import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 
 const isShowingDiffs = atom({ plugin: 'quiet-diffs', key: 'isShowingDiffs' } as const, false)
+// Quiet mode: each tool call is one dim line and its output is hidden, so
+// Claude's own text stands out. On by default; /quiet toggles it.
+const isFocusMode = atom({ plugin: 'quiet-diffs', key: 'isFocusMode' } as const, true)
 
 const FILE_TOOLS: readonly string[] = ['Edit', 'Write', 'NotebookEdit']
 const HINT = ' · diff hidden (ctrl+o to view, /diffs to show)'
@@ -97,6 +100,36 @@ function summarizeBash(diff: BashEditDiff): Part[] {
   return [{ text: `changed ${plural(total, 'file')} `, tone: 'dim' }, ...counts(added, removed)]
 }
 
+const PREVIEW_CHARS = 60
+
+function shorten(text: string): string {
+  const firstLine = (text.split('\n')[0] ?? '').replace(/\s+/g, ' ').trim()
+  const isCut = firstLine.length > PREVIEW_CHARS || text.includes('\n')
+  return isCut ? `${firstLine.slice(0, PREVIEW_CHARS)}…` : firstLine
+}
+
+// The short summary after the tool's name: a command, a file, a pattern.
+function previewOf(tool: string, input: unknown): string {
+  if (typeof input !== 'object' || input === null) return ''
+  const fields = input as Record<string, unknown>
+  if (tool === 'Bash' && typeof fields.command === 'string') return shorten(fields.command)
+  for (const key of ['file_path', 'notebook_path', 'path']) {
+    const value = fields[key]
+    if (typeof value === 'string') return fileName(value)
+  }
+  if (typeof fields.pattern === 'string') return shorten(fields.pattern)
+  const first = Object.values(fields).find(value => typeof value === 'string')
+  return typeof first === 'string' ? shorten(first) : ''
+}
+
+// The colored counts a focus line ends with, when the call changed files.
+function changesOf(tool: string, output: unknown): Part[] {
+  if (output === undefined) return []
+  if (FILE_TOOLS.includes(tool)) return summarizeFileTool(tool, output)
+  const bashDiff = tool === 'Bash' ? bashEditDiffOf(output) : undefined
+  return bashDiff !== undefined ? summarizeBash(bashDiff) : []
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
@@ -104,7 +137,48 @@ export const register: Register = on => {
       description: 'Toggle showing file diffs (edits and shell commands) in the transcript',
       immediate: true,
     })
+    await $.command.register({
+      name: 'quiet',
+      description: 'Toggle quiet mode: tool calls as one dim line, their output hidden',
+      immediate: true,
+    })
     return next(e)
+  })
+
+  on('command.run', { command: 'quiet' }, async $ => {
+    let isNowOn = false
+    await update($, isFocusMode, v => (isNowOn = !v))
+    return { text: isNowOn ? 'Quiet mode: on (ctrl+o shows everything)' : 'Quiet mode: off' }
+  })
+
+  // Quiet mode: the call's row becomes "· Bash  <command>  +3 −2", dim.
+  on('ui.render', { component: 'ToolUse' }, async ($, e, next) => {
+    const { tool, input, output, isRunning, isErrored, isInterrupted, isExpanded } = e.props
+    if (isExpanded || isErrored || isInterrupted || !(await read($, isFocusMode))) return next(e)
+
+    const { Box, Text } = $.ui.resolve(e)
+    const preview = previewOf(tool, input)
+    const changes = changesOf(tool, output)
+    return (
+      <Box key="focus-line">
+        <Text wrap="truncate-end">
+          <Text dimColor>
+            {'  · '}
+            {tool}
+            {preview !== '' ? `  ${preview}` : ''}
+            {isRunning ? '  …' : ''}
+          </Text>
+          {changes.length > 0 && <Text dimColor>{'  '}</Text>}
+          {changes.map(part =>
+            part.tone === 'dim' ? (
+              <Text dimColor>{part.text}</Text>
+            ) : (
+              <Text color={part.tone === 'add' ? 'success' : 'error'}>{part.text}</Text>
+            ),
+          )}
+        </Text>
+      </Box>
+    )
   })
 
   on('command.run', { command: 'diffs' }, async $ => {
@@ -115,6 +189,12 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
     const { tool, isExpanded, isErrored, output } = e.props
+    if (isExpanded || isErrored) return next(e)
+    if (await read($, isFocusMode)) {
+      // The call's own line already says what changed; the output is hidden.
+      const { Box } = $.ui.resolve(e)
+      return <Box key="hidden" />
+    }
     const bashDiff = tool === 'Bash' ? bashEditDiffOf(output) : undefined
     if (!FILE_TOOLS.includes(tool) && bashDiff === undefined) return next(e)
     // Full diff in the ctrl+o view, on errors, or when toggled on.

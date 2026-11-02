@@ -1,6 +1,6 @@
 {
   "name": "quiet-diffs",
-  "version": "0.2.0",
-  "description": "Hides file diffs (edits and shell commands) behind a one-line colored summary; /diffs toggles, ctrl+o shows full",
+  "version": "0.3.0",
+  "description": "Hides file diffs behind a colored one-line summary; quiet mode shows each tool call as one dim line",
   "types": "./types/index.d.ts"
 }

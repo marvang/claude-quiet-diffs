@@ -17,6 +17,20 @@ Additions are green, removals red. Covers Edit, Write, NotebookEdit, and files c
 - **/diffs** toggles diffs back on (or off) for the session.
 - Errors are always shown in full.
 
+## Quiet mode
+
+On by default: each tool call becomes one dim line with a short preview, and its output is hidden, so Claude's own text stands out.
+
+```
+  · Bash  cd ~/work/project && python3 update_state.py STATE.md  +8 −8
+  · Edit  STATE.md  +1 −1
+  · CronCreate  4 11 2 11 *
+```
+
+- **/quiet** toggles it (back to the one-line diff summaries above).
+- Failed or interrupted calls are always shown in full; **ctrl+o** shows everything.
+- For an even quieter screen, Claude Code's built-in **/focus** view (fullscreen renderer) hides tool calls entirely and shows only Claude's final message.
+
 ## Install
 
 At the prompt of a Claude Code terminal session:
