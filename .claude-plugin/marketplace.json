@@ -1,0 +1,5 @@
+{
+  "name": "claude-quiet-diffs",
+  "owner": { "name": "marvang" },
+  "plugins": [{ "name": "quiet-diffs", "source": "./" }]
+}
